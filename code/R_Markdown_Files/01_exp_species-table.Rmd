@@ -1,6 +1,6 @@
 ---
 title: "01_exp_species-table"
-output: html_document
+output: rmarkdown::github_document
 date: "2023-07-06"
 ---
 
