@@ -1,0 +1,195 @@
+01_exp_species-table
+================
+2023-07-06
+
+- This code creates Supplemental Table I, which is a table of the mean
+  densities (#/m3) of various zooplankton taxa stocked in each
+  experiment. As a proxy for stocking density, I used data from tanks
+  with zero jellies in them, excluding tanks that were sampled at the
+  beginning of the experiment, as these tanks were not included in
+  analyses down the line.
+- This code also creates a stacked bar plot to visualize those data,
+  which is not included in the paper.
+- The RMarkdown file is here:
+  <https://rpubs.com/HailaSchultz/exp_species-table>
+
+load packages
+
+``` r
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+```
+
+# Make tables
+
+## subset database to experiment data zero-jelly tanks
+
+Read database into R. If current database changes, just change the path
+
+``` r
+Database <- read.csv("/Users/hailaschultz/Dropbox/Other studies/Aurelia project/Data Analysis/data/current_data/Final_Aurelia_Database_Jan11_2023.csv")
+```
+
+Subset to zero jelly tanks. First subset the trial type to Number, which
+codes for samples from experiments where the number of jellyfish in the
+tanks varies. Next, subset to all tanks with zero jellyfish added. This
+includes tanks sampled at the beginning of the experiment and tanks
+sampled at the end.
+
+``` r
+Exp_data<-subset(Database,Trial.Type=="Number")
+Exp_data_zerojellies<-subset(Exp_data,Number.of.Jellies=="0")
+```
+
+## remove tanks sampled at the beginning of the experiment
+
+These tanks are removed because we decided not to include them in
+analyses down the line.
+
+First, read in the file that designates different samples to tanks with
+jellies `other`, tanks with zero jellies sampled at the beginning of the
+experiment `remove`, and tanks with zero jellies sampled at the end of
+the experiment `zero`
+
+``` r
+Control_tanks <- read.csv("/Users/hailaschultz/Dropbox/Other studies/Aurelia project/Data Analysis/data/current_data/Control_Tanks.csv")
+```
+
+Add control tank data to the database file
+
+``` r
+Exp_data_zerojellies$Control_info <- Control_tanks$c1[match(Exp_data_zerojellies$Sample.Code, Control_tanks$Sample.Code)]
+```
+
+Remove tanks sampled at the beginning of the experiment
+
+``` r
+Exp_data_control<-subset(Exp_data_zerojellies,Control_info!="remove")
+```
+
+## Combine taxa
+
+Combine species and life history stage
+
+``` r
+Exp_data_control$Species_lifestage <- paste(Exp_data_control$Genus.species, Exp_data_control$Life.History.Stage, sep="_")
+```
+
+Combine the following taxa: - Acartia and small calanoida are added to
+medium calanoida - Calanus pacificus Female Adult, Calanus pacificus
+Male Adult, and Calanus pacificus C5-adult are combined into Calanus
+pacficus - Ditrichocorycaeus anlgicus large and small are combined
+
+``` r
+Exp_data_control <- Exp_data_control %>%
+                   mutate(Species_lifestage_combined = fct_recode(Species_lifestage, 
+                                     "CALANOIDA_Medium" = "ACARTIA_Copepodite", 
+                                     "CALANOIDA_Medium" = "ACARTIA_Female, Adult",
+                                     "CALANUS PACIFICUS" = "CALANUS PACIFICUS_C5-adult",
+                                     "CALANUS PACIFICUS" = "CALANUS PACIFICUS_Female, Adult",
+                                     "CALANUS PACIFICUS" = "CALANUS PACIFICUS_Male, Adult",
+                                     "DITRICHOCORYCAEUS ANGLICUS" = "DITRICHOCORYCAEUS ANGLICUS_Large",
+                                     "DITRICHOCORYCAEUS ANGLICUS" = "DITRICHOCORYCAEUS ANGLICUS_Small"))
+```
+
+Sum grouped taxa
+
+``` r
+Exp_data_control_sum <-aggregate(Density....m3. ~ Sample.Code+Sample.Year+Sample.Date+Broad.Group+Species_lifestage_combined, data = Exp_data_control, sum)
+```
+
+## Calculate means and standard error per experiment
+
+Summarize by experiment, taxon, and life history stage.
+
+``` r
+Exp_data_control_sum <- Exp_data_control_sum %>%
+  group_by(Sample.Year,Sample.Date,Broad.Group,Species_lifestage_combined) %>%
+  summarise(
+    mean = mean(Density....m3.),
+    sd = sd(Density....m3.),
+    n = n(),
+    se = sd / sqrt(n)
+  )
+```
+
+## Make mean and standard error tables
+
+Mean table
+
+``` r
+#reformat table
+Exp_control_mean<-dcast(Exp_data_control_sum,Broad.Group+Species_lifestage_combined~Sample.Date, value.var = "mean")
+```
+
+Standard Error Table
+
+``` r
+#reformat table
+Exp_control_SE<-dcast(Exp_data_control_sum,Broad.Group+Species_lifestage_combined~Sample.Date, value.var = "se")
+```
+
+## Combine mean and standard error tables and format final table
+
+``` r
+# Round dataframes to 2 decimal points
+Exp_control_mean[, -c(1,2)]<-round(Exp_control_mean[, -c(1,2)],2)
+Exp_control_SE[, -c(1,2)]<-round(Exp_control_SE[, -c(1,2)],2)
+# Exclude first column
+columns_to_combine <- names(Exp_control_mean)[-c(1,2)]
+
+# Combine means and standard errors for selected columns
+Exp_stock_densities <- data.frame(
+  Exp_control_mean[, c(1,2)],
+  sapply(columns_to_combine, function(col) {
+   paste(Exp_control_mean[[col]], " ± ", Exp_control_SE[[col]])
+  })
+)
+```
+
+reformat species and date
+
+``` r
+Exp_stock_densities$Species_lifestage_combined <- gsub("_", " ", Exp_stock_densities$Species_lifestage_combined)
+```
+
+reformat column names
+
+``` r
+#remove X at the beginning
+names(Exp_stock_densities)[3:ncol(Exp_stock_densities)] <- substring(names(Exp_stock_densities)[3:ncol(Exp_stock_densities)], 2)
+#convert periods to slashes
+colnames(Exp_stock_densities) <- sub("\\.", "/", colnames(Exp_stock_densities))
+colnames(Exp_stock_densities) <- sub("\\.", "/", colnames(Exp_stock_densities))
+#replace first column name
+colnames(Exp_stock_densities)[colnames(Exp_stock_densities) == "xp_control_mean//.1."] <- "Taxa"
+```
+
+## Export table to csv
+
+``` r
+write.csv(Exp_stock_densities,"/Users/hailaschultz/Dropbox/Other studies/Aurelia project/Data Analysis/output/Experiment_Stocking_Means.csv", row.names = FALSE)
+```
+
+From this point on, the table can be edited in excel to fit the correct
+format for the table
+
+# Stacked Bar Chart
+
+``` r
+Exp_stacked_barplot<-ggplot(Exp_data_control_sum, aes(x = Sample.Date, y = mean, fill = Species_lifestage_combined)) +
+  geom_bar(stat = "identity",position = "fill") +
+  labs(x = "Date", y = "Mean Density") +
+  theme_minimal()
+Exp_stacked_barplot
+```
+
+<img src="01_exp_species-table_files/figure-gfm/unnamed-chunk-17-1.png" style="display: block; margin: auto;" />
+save plot as image
+
+``` r
+setwd("/Users/hailaschultz/Dropbox/Other studies/Aurelia project/Data Analysis/output")
+ggsave(plot = Exp_stacked_barplot, width = 20, height = 10, dpi = 300, filename = "Exp_stacked_barplot.png")
+```
